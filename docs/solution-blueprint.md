@@ -103,43 +103,64 @@ This system implements a **Loan Originations Platform** using CQRS (Command Quer
 
 ## Architecture Overview
 
+```mermaid
+flowchart TB
+    subgraph Route53["Route53 (Latency-Based Routing)"]
+        DNS[DNS Resolution]
+    end
+
+    subgraph East["us-east-1 (Primary)"]
+        WAF1[AWS WAF v2]
+        APIGW1[API Gateway REST]
+        CMD1[Command Lambda]
+        QRY1[Query Lambda]
+        PROJ1[Projector Lambda]
+        REDIS1[ElastiCache Redis<br/>Multi-AZ 1P+2R]
+        KIN1[Kinesis 2 shards]
+    end
+
+    subgraph West["us-west-2 (Secondary)"]
+        WAF2[AWS WAF v2]
+        APIGW2[API Gateway REST]
+        CMD2[Command Lambda]
+        QRY2[Query Lambda]
+        PROJ2[Projector Lambda]
+        REDIS2[ElastiCache Redis<br/>Multi-AZ 1P+2R]
+        KIN2[Kinesis 2 shards]
+    end
+
+    subgraph DDB["DynamoDB Global Tables"]
+        TABLE[LoanEvents<br/>bi-directional replication]
+    end
+
+    DNS --> WAF1
+    DNS --> WAF2
+    WAF1 --> APIGW1
+    WAF2 --> APIGW2
+    APIGW1 --> CMD1
+    APIGW1 --> QRY1
+    APIGW2 --> CMD2
+    APIGW2 --> QRY2
+    CMD1 --> TABLE
+    CMD2 --> TABLE
+    CMD1 --> KIN1
+    CMD2 --> KIN2
+    TABLE --> PROJ1
+    TABLE --> PROJ2
+    PROJ1 --> REDIS1
+    PROJ2 --> REDIS2
+    QRY1 --> REDIS1
+    QRY2 --> REDIS2
 ```
-                    Route53 (Latency-Based Routing)
-                              │
-              ┌───────────────┼───────────────┐
-              ▼                               ▼
-     ┌─────────────────┐             ┌─────────────────┐
-     │   us-east-1     │             │   us-west-2     │
-     │                 │             │                 │
-     │  ┌───────────┐  │             │  ┌───────────┐  │
-     │  │    WAF    │  │             │  │    WAF    │  │
-     │  └─────┬─────┘  │             │  └─────┬─────┘  │
-     │  ┌─────┴─────┐  │             │  ┌─────┴─────┐  │
-     │  │API Gateway │  │             │  │API Gateway │  │
-     │  └─────┬─────┘  │             │  └─────┬─────┘  │
-     │  ┌─────┴─────┐  │             │  ┌─────┴─────┐  │
-     │  │  Lambda   │  │             │  │  Lambda   │  │
-     │  │(Cmd+Query)│  │             │  │(Cmd+Query)│  │
-     │  └─────┬─────┘  │             │  └─────┬─────┘  │
-     │        │        │             │        │        │
-     │  ┌─────┴──────────────────────────────┴─────┐  │
-     │  │       DynamoDB Global Tables              │  │
-     │  │   (bi-directional event replication)      │  │
-     │  └─────┬──────────────────────────────┬─────┘  │
-     │        │        │             │       │        │
-     │  DDB Streams    │             │  DDB Streams   │
-     │        │        │             │       │        │
-     │  ┌─────┴─────┐  │             │  ┌────┴──────┐ │
-     │  │ Projector │  │             │  │ Projector │ │
-     │  │  Lambda   │  │             │  │  Lambda   │ │
-     │  └─────┬─────┘  │             │  └────┬──────┘ │
-     │  ┌─────┴─────┐  │             │  ┌────┴──────┐ │
-     │  │ElastiCache│  │             │  │ElastiCache│ │
-     │  │Multi-AZ   │  │             │  │Multi-AZ   │ │
-     │  │(1P + 2R)  │  │             │  │(1P + 2R)  │ │
-     │  └───────────┘  │             │  └───────────┘ │
-     └─────────────────┘             └─────────────────┘
-```
+
+**Data Flow:**
+
+| Path | Flow |
+|------|------|
+| Write (Command) | Client -> Route53 -> WAF -> API GW -> Command Lambda -> DynamoDB Global Table -> Kinesis |
+| Read (Query) | Client -> Route53 -> WAF -> API GW -> Query Lambda -> ElastiCache Redis |
+| Projection | DynamoDB Streams -> Projector Lambda -> ElastiCache Redis (per-region) |
+| Replication | DynamoDB Global Tables sync events bi-directionally between regions (<1s) |
 
 **Component Summary:**
 
@@ -160,7 +181,7 @@ This system implements a **Loan Originations Platform** using CQRS (Command Quer
 
 ### Data Flow
 
-1. **Ingest:** Client submits loan command via HTTPS → Route53 routes to nearest region's API Gateway
+1. **Ingest:** Client submits loan command via HTTPS -> Route53 routes to nearest region's API Gateway
 2. **Validate:** Command Lambda queries local DynamoDB replica, replays events to current state, validates business rules
 3. **Persist:** New event written to local DynamoDB replica with optimistic concurrency (conditional write)
 4. **Replicate:** DynamoDB Global Tables automatically replicate the event to the other region (<1s)
@@ -192,8 +213,8 @@ This system implements a **Loan Originations Platform** using CQRS (Command Quer
 
 ### Testing Performed
 
-- **Functional Testing:** Full CQRS lifecycle validated across regions (Submit in us-east-1 → Approve in us-west-2 → Disburse in us-east-1).
-- **Cross-Region Replication:** Verified DynamoDB Global Tables replication in <3 seconds end-to-end (including DDB Streams → Projector → Redis).
+- **Functional Testing:** Full CQRS lifecycle validated across regions (Submit in us-east-1 -> Approve in us-west-2 -> Disburse in us-east-1).
+- **Cross-Region Replication:** Verified DynamoDB Global Tables replication in <3 seconds end-to-end (including DDB Streams -> Projector -> Redis).
 - **Concurrency:** Optimistic concurrency (conditional writes) confirmed to prevent duplicate events under concurrent multi-region writes.
 - **Read Latency:** Redis GET operations <5ms p99 within each region's VPC.
 - **Cold Start:** Provisioned concurrency (50) eliminates Lambda cold starts for the critical path.
@@ -327,11 +348,11 @@ If usage increases 10x:
 | Aspect | Implementation |
 |--------|---------------|
 | IaC | AWS CDK (TypeScript) — `cdk deploy --all` provisions Global + 2 Regional stacks |
-| CI/CD | GitHub Actions: build → test → cdk deploy on push to `aws-native` branch. Both regions deployed in single pipeline. |
-| Stacks | `LoanOriginationsGlobal` (DynamoDB Global Table) → `LoanOriginationsPrimary` (us-east-1) → `LoanOriginationsSecondary` (us-west-2) |
+| CI/CD | GitHub Actions: build -> test -> cdk deploy on push to `aws-native` branch. Both regions deployed in single pipeline. |
+| Stacks | `LoanOriginationsGlobal` (DynamoDB Global Table) -> `LoanOriginationsPrimary` (us-east-1) -> `LoanOriginationsSecondary` (us-west-2) |
 | Rollback | CDK maintains previous versions. Lambda aliases + provisioned concurrency enable instant function rollback. API Gateway canary deployments for gradual rollout. |
-| Blue/Green | Supported via Lambda aliases (live vs canary). Can shift traffic gradually 10% → 50% → 100%. |
-| Health Checks | Regional health endpoints. Route53 monitors both regions. Failed deploy detected via CloudWatch alarms → automatic rollback. |
+| Blue/Green | Supported via Lambda aliases (live vs canary). Can shift traffic gradually 10% -> 50% -> 100%. |
+| Health Checks | Regional health endpoints. Route53 monitors both regions. Failed deploy detected via CloudWatch alarms -> automatic rollback. |
 | Phased Rollout | Primary region deployed first. Validated. Then secondary. Allows catching issues before full multi-region exposure. |
 
 ---
