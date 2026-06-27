@@ -3,7 +3,7 @@
 
 **Document Owner:** epatro
 
-**Link to Opportunity:** N/A (PoC / Technical Validation)
+**Link to Opportunity:** https://aws-crm.lightning.force.com/lightning/r/Opportunity/006RU00000THzSzYAL/view
 
 **Last Updated Date:** 2026-06-27
 
@@ -40,7 +40,7 @@ This system implements a **Loan Originations Platform** using CQRS (Command Quer
 | Team Member | Role | Team | Overview of Work |
 |-------------|------|------|------------------|
 | epatro | SA | Account Team | Accountable SA. Designed serverless CQRS/ES architecture, built PoC, evolved to production multi-region, deployed, and produced this document. |
-| donbarb | Manager | Account Team | Oversight and financial owner |
+| donbarb | SA Manager | Account Team | SA management oversight |
 
 ---
 
