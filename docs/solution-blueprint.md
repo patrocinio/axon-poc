@@ -105,34 +105,7 @@ This system implements a **Loan Originations Platform** using CQRS (Command Quer
 
 ### Multi-Region Active-Active Topology
 
-    +------------------+                    +------------------+
-    |    us-east-1     |                    |    us-west-2     |
-    |                  |                    |                  |
-    |  [WAF v2]        |                    |  [WAF v2]        |
-    |      |           |                    |      |           |
-    |  [API Gateway]   |                    |  [API Gateway]   |
-    |      |           |                    |      |           |
-    |  [Command Lambda]|                    |  [Command Lambda]|
-    |  [Query Lambda]  |                    |  [Query Lambda]  |
-    |      |           |                    |      |           |
-    |      v           |                    |      v           |
-    |  +----------+    |                    |  +----------+    |
-    |  | DynamoDB |<---+--- Global Tables --+--->| DynamoDB |    |
-    |  | (events) |    |   (bi-dir sync)    |  | (replica)|    |
-    |  +----+-----+    |                    |  +----+-----+    |
-    |       |          |                    |       |          |
-    |  DDB Streams     |                    |  DDB Streams     |
-    |       |          |                    |       |          |
-    |  [Projector]     |                    |  [Projector]     |
-    |       |          |                    |       |          |
-    |  [Redis 1P+2R]   |                    |  [Redis 1P+2R]   |
-    |  (Multi-AZ)      |                    |  (Multi-AZ)      |
-    +------------------+                    +------------------+
-              ^                                      ^
-              |          Route53 Latency             |
-              +------------- Routing ---------------+
-                              |
-                          [Client]
+![Architecture Diagram](architecture-diagram.jpg)
 
 ### Data Flow Summary
 
