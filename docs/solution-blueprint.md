@@ -103,57 +103,38 @@ This system implements a **Loan Originations Platform** using CQRS (Command Quer
 
 ## Architecture Overview
 
-```mermaid
-flowchart TB
-    subgraph Route53["Route53 (Latency-Based Routing)"]
-        DNS[DNS Resolution]
-    end
+### Multi-Region Active-Active Topology
 
-    subgraph East["us-east-1 (Primary)"]
-        WAF1[AWS WAF v2]
-        APIGW1[API Gateway REST]
-        CMD1[Command Lambda]
-        QRY1[Query Lambda]
-        PROJ1[Projector Lambda]
-        REDIS1[ElastiCache Redis<br/>Multi-AZ 1P+2R]
-        KIN1[Kinesis 2 shards]
-    end
+    +------------------+                    +------------------+
+    |    us-east-1     |                    |    us-west-2     |
+    |                  |                    |                  |
+    |  [WAF v2]        |                    |  [WAF v2]        |
+    |      |           |                    |      |           |
+    |  [API Gateway]   |                    |  [API Gateway]   |
+    |      |           |                    |      |           |
+    |  [Command Lambda]|                    |  [Command Lambda]|
+    |  [Query Lambda]  |                    |  [Query Lambda]  |
+    |      |           |                    |      |           |
+    |      v           |                    |      v           |
+    |  +----------+    |                    |  +----------+    |
+    |  | DynamoDB |<---+--- Global Tables --+--->| DynamoDB |    |
+    |  | (events) |    |   (bi-dir sync)    |  | (replica)|    |
+    |  +----+-----+    |                    |  +----+-----+    |
+    |       |          |                    |       |          |
+    |  DDB Streams     |                    |  DDB Streams     |
+    |       |          |                    |       |          |
+    |  [Projector]     |                    |  [Projector]     |
+    |       |          |                    |       |          |
+    |  [Redis 1P+2R]   |                    |  [Redis 1P+2R]   |
+    |  (Multi-AZ)      |                    |  (Multi-AZ)      |
+    +------------------+                    +------------------+
+              ^                                      ^
+              |          Route53 Latency             |
+              +------------- Routing ---------------+
+                              |
+                          [Client]
 
-    subgraph West["us-west-2 (Secondary)"]
-        WAF2[AWS WAF v2]
-        APIGW2[API Gateway REST]
-        CMD2[Command Lambda]
-        QRY2[Query Lambda]
-        PROJ2[Projector Lambda]
-        REDIS2[ElastiCache Redis<br/>Multi-AZ 1P+2R]
-        KIN2[Kinesis 2 shards]
-    end
-
-    subgraph DDB["DynamoDB Global Tables"]
-        TABLE[LoanEvents<br/>bi-directional replication]
-    end
-
-    DNS --> WAF1
-    DNS --> WAF2
-    WAF1 --> APIGW1
-    WAF2 --> APIGW2
-    APIGW1 --> CMD1
-    APIGW1 --> QRY1
-    APIGW2 --> CMD2
-    APIGW2 --> QRY2
-    CMD1 --> TABLE
-    CMD2 --> TABLE
-    CMD1 --> KIN1
-    CMD2 --> KIN2
-    TABLE --> PROJ1
-    TABLE --> PROJ2
-    PROJ1 --> REDIS1
-    PROJ2 --> REDIS2
-    QRY1 --> REDIS1
-    QRY2 --> REDIS2
-```
-
-**Data Flow:**
+### Data Flow Summary
 
 | Path | Flow |
 |------|------|
